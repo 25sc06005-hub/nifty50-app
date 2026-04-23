@@ -117,10 +117,20 @@ def compute_rsi(df, window=14):
 # -------------------------------
 returns = {}
 
-for stock in portfolio_stocks:
-    df = get_stock_df(stock).dropna()
-    if len(df) > 1:
-        returns[stock] = (df['Close'].iloc[-1] / df['Close'].iloc[0] - 1) * 100
+for stock in selected_stocks:
+    try:
+        df = get_stock_df(stock)
+
+        if df.empty or 'Close' not in df.columns:
+            continue
+
+        close = df['Close'].dropna()
+
+        if len(close) > 1:
+            returns[stock] = ((close.iloc[-1] / close.iloc[0]) - 1) * 100
+
+    except Exception as e:
+        continue
 
 
 
@@ -159,14 +169,25 @@ if not returns_df.empty:
 # -------------------------------
 st.subheader("Returns Comparison")
 
-if not returns_df.empty:
-    fig = px.bar(
-        returns_df,
-        x=returns_df.index,
-        y="Return (%)",
-        color="Return (%)",
-        color_continuous_scale="RdYlGn"
-    )
+if returns_df.empty:
+    st.warning("No return data available.")
+else:
+    # If only one stock → avoid color scale bug
+    if len(returns_df) == 1:
+        fig = px.bar(
+            returns_df,
+            x=returns_df.index,
+            y="Return (%)"
+        )
+    else:
+        fig = px.bar(
+            returns_df,
+            x=returns_df.index,
+            y="Return (%)",
+            color="Return (%)",
+            color_continuous_scale="RdYlGn"
+        )
+
     st.plotly_chart(fig, use_container_width=True)
 
 
