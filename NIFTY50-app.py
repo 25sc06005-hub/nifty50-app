@@ -3,26 +3,40 @@ from PIL import Image
 import pytesseract
 import datetime
 import os
+import glob
 
 st.set_page_config(page_title="SnapBook", page_icon="📚", layout="centered")
 st.title("📚 SnapBook")
 
-# 1. Manage Notebooks in Session State
-if "subjects" not in st.session_state:
-    st.session_state.subjects = ["Physics", "Chemistry", "Mathematics"]
+# Automatically discover all subject notebooks saved on disk
+def get_saved_subjects():
+    default_subjects = ["Physics", "Chemistry", "Mathematics"]
+    # Look for any existing *_notebook.txt files on the computer
+    existing_files = glob.glob("*_notebook.txt")
+    discovered = [f.replace("_notebook.txt", "").capitalize() for f in existing_files]
+    # Merge defaults and discovered subjects while eliminating duplicates
+    return list(dict.fromkeys(default_subjects + discovered))
 
 st.sidebar.header("Manage Notebooks")
 
-# Feature 1: Create a NEW custom notebook
+# Load subjects dynamically from disk
+subjects_list = get_saved_subjects()
+
+# 1. Create a NEW custom notebook and save it to disk immediately
 new_subject = st.sidebar.text_input("Create New Subject Notebook")
 if st.sidebar.button("➕ Add Notebook") and new_subject.strip():
     clean_name = new_subject.strip().capitalize()
-    if clean_name not in st.session_state.subjects:
-        st.session_state.subjects.append(clean_name)
-        st.sidebar.success(f"Added '{clean_name}'!")
+    file_path = f"{clean_name.lower()}_notebook.txt"
+    
+    # Create the text file on disk so it persists across refreshes
+    if not os.path.exists(file_path):
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"# 📖 {clean_name} Notebook\n\n---\n")
+        st.sidebar.success(f"Created '{clean_name}'!")
+        st.rerun()
 
-# Select active notebook from the list
-subject = st.sidebar.selectbox("Select Active Subject", st.session_state.subjects)
+# Select active notebook from the persistent list
+subject = st.sidebar.selectbox("Select Active Subject", subjects_list)
 
 st.sidebar.markdown("---")
 
@@ -53,7 +67,7 @@ if uploaded_file:
                 
             st.success(f"Appended to **{subject} Notebook**!")
 
-# 3. Live Display + Feature 2: Download/Save File to User's PC
+# 3. Live Display + Download Option
 st.divider()
 st.subheader(f"📖 Live Notebook: {subject}")
 
@@ -65,7 +79,6 @@ if os.path.exists(file_path):
     
     st.markdown(notebook_content)
     
-    # Allows the user to save/download the file directly to their Downloads folder
     st.download_button(
         label=f"💾 Download {subject} Notebook (.txt)",
         data=notebook_content,
