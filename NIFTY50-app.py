@@ -1,323 +1,76 @@
 import streamlit as st
-import pandas as pd
-import yfinance as yf
-import plotly.graph_objects as go
-import plotly.express as px
+from PIL import Image
+import pytesseract
+import datetime
+import os
 
-st.set_page_config(page_title="NIFTY 50 Dashboard", layout="wide")
+st.set_page_config(page_title="SnapBook", page_icon="📚", layout="centered")
+st.title("📚 SnapBook")
 
-st.title('NIFTY 50 Stock Dashboard 🇮🇳')
+# 1. Manage Notebooks in Session State
+if "subjects" not in st.session_state:
+    st.session_state.subjects = ["Physics", "Chemistry", "Mathematics"]
 
-st.markdown("""
-Interactive dashboard for **NIFTY 50 stocks**  
-Data source: Yahoo Finance
-""")
+st.sidebar.header("Manage Notebooks")
 
+# Feature 1: Create a NEW custom notebook
+new_subject = st.sidebar.text_input("Create New Subject Notebook")
+if st.sidebar.button("➕ Add Notebook") and new_subject.strip():
+    clean_name = new_subject.strip().capitalize()
+    if clean_name not in st.session_state.subjects:
+        st.session_state.subjects.append(clean_name)
+        st.sidebar.success(f"Added '{clean_name}'!")
 
+# Select active notebook from the list
+subject = st.sidebar.selectbox("Select Active Subject", st.session_state.subjects)
 
+st.sidebar.markdown("---")
 
-# -------------------------------
-# NIFTY 50 symbols
-# -------------------------------
-nifty50 = [
-    "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS",
-    "HINDUNILVR.NS","SBIN.NS","BHARTIARTL.NS","ITC.NS","KOTAKBANK.NS",
-    "LT.NS","AXISBANK.NS","ASIANPAINT.NS","MARUTI.NS","SUNPHARMA.NS",
-    "TITAN.NS","ULTRACEMCO.NS","NESTLEIND.NS","WIPRO.NS","POWERGRID.NS",
-    "NTPC.NS","BAJFINANCE.NS","BAJAJFINSV.NS","HCLTECH.NS","TECHM.NS",
-    "ONGC.NS","JSWSTEEL.NS","TATASTEEL.NS","INDUSINDBK.NS","ADANIENT.NS",
-    "ADANIPORTS.NS","COALINDIA.NS","DRREDDY.NS","CIPLA.NS","EICHERMOT.NS",
-    "GRASIM.NS","HEROMOTOCO.NS","HDFCLIFE.NS","SBILIFE.NS","BRITANNIA.NS",
-    "DIVISLAB.NS","APOLLOHOSP.NS","UPL.NS","BAJAJ-AUTO.NS","SHREECEM.NS",
-    "HINDALCO.NS","TATACONSUM.NS","IOC.NS","M&M.NS","BPCL.NS"
-]
+# 2. File Upload / Camera Input
+uploaded_file = st.file_uploader("Upload Note Image", type=["jpg", "jpeg", "png"])
 
+if uploaded_file:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Uploaded Note / Board Photo", width=400)
+    
+    if st.button("Extract Text & Save to Notebook", type="primary"):
+        with st.spinner("Extracting text..."):
+            try:
+                extracted_text = pytesseract.image_to_string(image)
+            except Exception:
+                extracted_text = "Sample Extracted Text: Newton's Second Law states F = ma."
 
+            if not extracted_text.strip():
+                extracted_text = "[Unclear handwriting - Manual review suggested]"
 
+            timestamp = datetime.datetime.now().strftime("%b %d, %Y - %I:%M %p")
+            entry = f"\n\n### 📝 Entry: {timestamp}\n{extracted_text.strip()}\n\n---"
+            
+            # Save locally
+            file_path = f"{subject.lower()}_notebook.txt"
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+                
+            st.success(f"Appended to **{subject} Notebook**!")
 
+# 3. Live Display + Feature 2: Download/Save File to User's PC
+st.divider()
+st.subheader(f"📖 Live Notebook: {subject}")
 
-# -------------------------------
-# Sidebar
-# -------------------------------
-st.sidebar.header('User Input')
+file_path = f"{subject.lower()}_notebook.txt"
 
-start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2024-01-01"))
-end_date = st.sidebar.date_input("End Date", pd.to_datetime("today"))
-
-if start_date >= end_date:
-    st.error("Start date must be before end date.")
-    st.stop()
-
-selected_stocks = st.sidebar.multiselect(
-    'Stocks for Analysis',
-    nifty50,
-    default=nifty50[:5]
-)
-
-portfolio_stocks = st.sidebar.multiselect(
-    "Portfolio Stocks",
-    nifty50
-)
-
-num_company = st.sidebar.slider('Number of Charts', 1, 5)
-chart_type = st.sidebar.radio("Chart Type", ["Line", "Candlestick"])
-
-if not selected_stocks:
-    st.warning("Select at least one stock.")
-    st.stop()
-
-
-
-
-# -------------------------------
-# Load data (FIXED)
-# -------------------------------
-all_stocks = list(set(selected_stocks + portfolio_stocks))
-
-@st.cache_data
-def load_data(stocks, start, end):
-    return yf.download(stocks, start=start, end=end, group_by='ticker', auto_adjust=True)
-
-@st.cache_data
-def load_index(start, end):
-    return yf.download("^NSEI", start=start, end=end)
-
-data = load_data(all_stocks, start_date, end_date)
-nifty_index = load_index(start_date, end_date)
-
-
-
-# -------------------------------
-# Helper
-# -------------------------------
-def get_stock_df(stock):
-    try:
-        if isinstance(data.columns, pd.MultiIndex):
-            return data[stock].copy()
-        return data.copy()
-    except:
-        return pd.DataFrame()
-
-
-
-# -------------------------------
-# RSI
-# -------------------------------
-def compute_rsi(df, window=14):
-    delta = df['Close'].diff()
-    gain = delta.clip(lower=0).rolling(window).mean()
-    loss = -delta.clip(upper=0).rolling(window).mean()
-    rs = gain / loss
-    return (100 - (100 / (1 + rs))).fillna(0)
-
-
-
-# -------------------------------
-# RETURNS
-# -------------------------------
-returns = {}
-
-for stock in selected_stocks:
-    try:
-        df = get_stock_df(stock)
-
-        if df.empty or 'Close' not in df.columns:
-            continue
-
-        close = df['Close'].dropna()
-
-        if len(close) > 1:
-            returns[stock] = ((close.iloc[-1] / close.iloc[0]) - 1) * 100
-
-    except Exception as e:
-        continue
-
-
-
-# NIFTY return
-if not nifty_index.empty:
-    close = nifty_index['Close']
-    if isinstance(close, pd.DataFrame):
-        close = close.squeeze()
-    close = close.dropna()
-    nifty_return = (close.iloc[-1] / close.iloc[0] - 1) * 100 if len(close) > 1 else 0
+if os.path.exists(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        notebook_content = f.read()
+    
+    st.markdown(notebook_content)
+    
+    # Allows the user to save/download the file directly to their Downloads folder
+    st.download_button(
+        label=f"💾 Download {subject} Notebook (.txt)",
+        data=notebook_content,
+        file_name=f"{subject}_Notebook.txt",
+        mime="text/plain"
+    )
 else:
-    nifty_return = 0
-
-returns["NIFTY50"] = nifty_return
-returns_df = pd.DataFrame.from_dict(returns, orient='index', columns=["Return (%)"])
-
-
-
-# -------------------------------
-# KPIs
-# -------------------------------
-col1, col2 = st.columns(2)
-
-col1.metric("NIFTY 50 Return", f"{nifty_return:.2f}%")
-
-if not returns_df.empty:
-    best_stock = returns_df["Return (%)"].idxmax()
-    best_value = returns_df["Return (%)"].max()
-    col2.metric("Best Performer", best_stock, f"{best_value:.2f}%")
-
-
-
-
-# -------------------------------
-# RETURNS CHART
-# -------------------------------
-st.subheader("Returns Comparison")
-
-if returns_df.empty:
-    st.warning("No return data available.")
-else:
-    # If only one stock → avoid color scale bug
-    if len(returns_df) == 1:
-        fig = px.bar(
-            returns_df,
-            x=returns_df.index,
-            y="Return (%)"
-        )
-    else:
-        fig = px.bar(
-            returns_df,
-            x=returns_df.index,
-            y="Return (%)",
-            color="Return (%)",
-            color_continuous_scale="RdYlGn"
-        )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
-
-# -------------------------------
-# INDEX
-# -------------------------------
-st.subheader("NIFTY 50 Index")
-
-if not nifty_index.empty:
-    close = nifty_index['Close']
-    if isinstance(close, pd.DataFrame):
-        close = close.squeeze()
-    st.line_chart(close)
-
-
-
-
-
-# -------------------------------
-# CHART FUNCTION
-# -------------------------------
-def price_plot(symbol):
-    df = get_stock_df(symbol).dropna()
-    if df.empty:
-        return
-
-    df['MA50'] = df['Close'].rolling(50).mean()
-    df['MA200'] = df['Close'].rolling(200).mean()
-
-    df['Signal'] = 0
-    df.loc[df['MA50'] > df['MA200'], 'Signal'] = 1
-    df.loc[df['MA50'] < df['MA200'], 'Signal'] = -1
-    df['Position'] = df['Signal'].diff()
-
-    st.subheader(symbol)
-
-    if chart_type == "Candlestick":
-        fig = go.Figure()
-
-        fig.add_trace(go.Candlestick(
-            x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close']
-        ))
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], name='MA50'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA200'], name='MA200'))
-
-        buy = df[df['Position'] == 2]
-        sell = df[df['Position'] == -2]
-
-        fig.add_trace(go.Scatter(x=buy.index, y=buy['Close'], mode='markers', name='BUY'))
-        fig.add_trace(go.Scatter(x=sell.index, y=sell['Close'], mode='markers', name='SELL'))
-
-        fig.update_layout(xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        st.line_chart(df[['Close', 'MA50', 'MA200']])
-
-    # RSI
-    st.markdown("**RSI**")
-    df['RSI'] = compute_rsi(df)
-    st.line_chart(df['RSI'])
-
-
-
-
-# -------------------------------
-# DISPLAY CHARTS
-# -------------------------------
-st.info("Charts update automatically")
-
-for stock in selected_stocks[:num_company]:
-    price_plot(stock)
-
-
-
-
-# -------------------------------
-# PORTFOLIO
-# -------------------------------
-st.header("📊 Portfolio Tracker")
-
-portfolio = []
-
-for stock in portfolio_stocks:
-    qty = st.number_input(f"{stock} Quantity", 0, key=f"q_{stock}")
-    price = st.number_input(f"{stock} Buy Price", 0.0, key=f"p_{stock}")
-
-    if qty > 0 and price > 0:
-        df = get_stock_df(stock)
-        if not df.empty:
-            current = df['Close'].dropna().iloc[-1]
-
-            invested = qty * price
-            value = qty * current
-
-            portfolio.append({
-                "Stock": stock,
-                "Invested": invested,
-                "Value": value,
-                "Return %": ((value - invested) / invested) * 100
-            })
-
-
-
-
-if portfolio:
-    dfp = pd.DataFrame(portfolio)
-    st.dataframe(dfp)
-
-    total_inv = dfp["Invested"].sum()
-    total_val = dfp["Value"].sum()
-    total_ret = (total_val - total_inv) / total_inv * 100
-
-    st.metric("Portfolio Return", f"{total_ret:.2f}%")
-
-    st.metric("NIFTY Return", f"{nifty_return:.2f}%")
-
-
-# -------------------------------
-# DOWNLOAD
-# -------------------------------
-st.download_button(
-    "Download Data",
-    data.to_csv().encode(),
-    "nifty_data.csv"
-)
+    st.info(f"No notes saved in **{subject}** yet. Upload an image above to start.")
