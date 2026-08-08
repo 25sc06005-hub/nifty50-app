@@ -527,6 +527,7 @@ dependencies = [
     { name = "google-generativeai" },
     { name = "pillow" },
     { name = "pytesseract" },
+    { name = "requests" },
     { name = "streamlit" },
 ]
 
@@ -535,6 +536,7 @@ requires-dist = [
     { name = "google-generativeai", specifier = ">=0.8.6" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytesseract", specifier = ">=0.3.13" },
+    { name = "requests", specifier = ">=2.34.2" },
     { name = "streamlit", specifier = ">=1.61.1" },
 ]
 

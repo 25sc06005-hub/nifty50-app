@@ -1,105 +1,131 @@
 import streamlit as st
-import google.generativeai as genai
+import requests
 import json
-import time
 
-st.set_page_config(page_title="AutoShield for Google", page_icon="🌐", layout="centered")
+st.set_page_config(page_title="ReviewShield API Engine", page_icon="⚙️", layout="centered")
 
-st.title("🌐 AutoShield: Google Reviews Automation")
-st.caption("Auto-sync Google Maps reviews and publish AI replies with 1 click.")
-
-# 1. API Configuration
-st.sidebar.header("⚙️ Configuration")
-api_key = st.sidebar.text_input("Enter Free Gemini API Key", type="password")
-
-# 2. Simulated Google Business Profile Connection
-st.sidebar.markdown("---")
-st.sidebar.subheader("Google Business Account")
-if "connected" not in st.session_state:
-    st.session_state.connected = False
-
-if not st.session_state.connected:
-    if st.sidebar.button("🔗 Connect Google Business"):
-        st.session_state.connected = True
-        st.sidebar.success("Connected to 'Bella's Italian Bistro'!")
-        st.rerun()
-else:
-    st.sidebar.success("🟢 Connected: Bella's Italian Bistro")
-
-# Mock Incoming Google Reviews (Simulating Google API)
-MOCK_GOOGLE_REVIEWS = [
-    {
-        "id": "rev_01",
-        "author": "Rahul Sharma",
-        "stars": 1,
-        "date": "10 mins ago",
-        "review": "The food took 50 minutes to arrive and was completely cold. Poor service."
-    },
-    {
-        "id": "rev_02",
-        "author": "Ananya Patel",
-        "stars": 5,
-        "date": "2 hours ago",
-        "review": "Best pasta in town! The staff was super warm and hospitable. Will come again!"
-    }
-]
-
-# 3. Main Dashboard
-if not st.session_state.connected:
-    st.info("Click 'Connect Google Business' in the sidebar to sync incoming Google Maps reviews.")
-else:
-    st.subheader("📥 Incoming Unreplied Google Reviews")
+# ==========================================
+# 1. CUSTOM REST API CLIENT MODULE
+# ==========================================
+class GeminiRESTClient:
+    """Custom REST API client handling direct HTTP requests to Google's Gemini API."""
     
-    # Select a review pulled from "Google"
-    review_options = [f"{r['stars']}⭐ from {r['author']} ({r['date']})" for r in MOCK_GOOGLE_REVIEWS]
-    selected_idx = st.selectbox("Select Review to Process:", range(len(review_options)), format_func=lambda x: review_options[x])
-    
-    selected_review = MOCK_GOOGLE_REVIEWS[selected_idx]
-    
-    st.card = st.container(border=True)
-    st.card.write(f"**Author:** {selected_review['author']}")
-    st.card.write(f"**Rating:** {'⭐' * selected_review['stars']}")
-    st.card.write(f"**Review:** \"{selected_review['review']}\"")
-    
-    if st.button("Generate & Publish to Google", type="primary"):
-        if not api_key:
-            st.error("Please enter your free Gemini API key in the sidebar.")
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        # Direct REST API endpoint
+        self.endpoint = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-1.5-flash:generateContent?key={self.api_key}"
+        )
+        self.headers = {"Content-Type": "application/json"}
+
+    def analyze_and_respond(self, business_name: str, star_rating: int, review_text: str) -> dict:
+        """Constructs raw HTTP payload, handles POST request, and parses JSON output."""
+        prompt = f"""
+        You are an expert customer relations manager for '{business_name}'.
+        Customer Rating: {star_rating} / 5 stars.
+        Customer Review: "{review_text}"
+
+        Analyze the review and return raw JSON ONLY with these exact keys:
+        {{
+            "sentiment": "Positive" | "Neutral" | "Negative",
+            "core_issue": "1 sentence identifying the main issue or compliment",
+            "generated_reply": "A polished, professional response directly addressing the customer on Google Maps.",
+            "staff_action_tip": "1 practical action item for internal staff."
+        }}
+        """
+
+        # Structuring the raw JSON HTTP POST body
+        payload = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "generationConfig": {
+                "response_mime_type": "application/json"
+            }
+        }
+
+        # Making direct HTTP POST request using Python `requests`
+        response = requests.post(
+            self.endpoint, 
+            headers=self.headers, 
+            data=json.dumps(payload),
+            timeout=10
+        )
+
+        # Handling API status codes explicitly
+        if response.status_code == 200:
+            response_json = response.json()
+            # Extracting content text from REST payload structure
+            raw_content = response_json["candidates"][0]["content"]["parts"][0]["text"]
+            return json.loads(raw_content)
         else:
-            with st.spinner("Analyzing review and communicating with Google API..."):
-                try:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+            raise Exception(f"HTTP Error {response.status_code}: {response.text}")
 
-                    prompt = f"""
-                    You are responding on behalf of Bella's Italian Bistro on Google Maps.
-                    Customer Rating: {selected_review['stars']} stars.
-                    Customer Review: "{selected_review['review']}"
 
-                    Return raw JSON ONLY:
-                    {{
-                        "sentiment": "Positive" | "Negative",
-                        "reply": "A polite, short response to post publicly on Google Maps."
-                    }}
-                    """
+# ==========================================
+# 2. STREAMLIT FRONTEND DASHBOARD
+# ==========================================
+st.title("⚙️ ReviewShield (Custom API Client)")
+st.caption("Direct HTTP/REST API Integration Engine for Google Reviews")
 
-                    response = model.generate_content(
-                        prompt,
-                        generation_config={"response_mime_type": "application/json"}
-                    )
-                    
-                    result = json.loads(response.text)
+# Sidebar Configuration
+st.sidebar.header("🔑 Authentication")
+api_key = st.sidebar.text_input("Enter Free Gemini API Key", type="password")
+st.sidebar.caption("Get a free key at [aistudio.google.com](https://aistudio.google.com)")
 
-                    st.divider()
-                    st.subheader("🚀 Google Reply Status")
-                    
-                    st.write(f"**Sentiment Analysis:** `{result.get('sentiment')}`")
-                    st.code(result.get("reply"), language="text")
-                    
-                    # Simulating the API POST call back to Google
-                    with st.spinner("Posting reply directly to Google Maps..."):
-                        time.sleep(1.5) # Fake network delay for demo
-                    
-                    st.success("✅ Reply published directly to Google Business Profile!")
+# Input Controls
+st.subheader("1. Request Payload Parameters")
+biz_name = st.text_input("Business Name", value="Bella's Italian Bistro")
+stars = st.slider("Customer Star Rating", 1, 5, 1)
+review = st.text_area(
+    "Customer Review Text:",
+    value="The table was dirty when we sat down, and our pasta took almost an hour to come out."
+)
 
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
+# API Trigger Button
+if st.button("Execute Custom REST API Call", type="primary"):
+    if not api_key:
+        st.error("Please enter your API Key in the sidebar.")
+    elif not review.strip():
+        st.warning("Please enter a customer review.")
+    else:
+        with st.spinner("Dispatching HTTP POST request to Gemini REST Endpoint..."):
+            try:
+                # Instantiate custom REST client
+                client = GeminiRESTClient(api_key=api_key)
+                
+                # Execute API call
+                result = client.analyze_and_respond(
+                    business_name=biz_name,
+                    star_rating=stars,
+                    review_text=review
+                )
+
+                # Render Response
+                st.divider()
+                st.subheader("2. HTTP Response Data")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    sentiment = result.get("sentiment", "Neutral")
+                    if sentiment == "Negative":
+                        st.error(f"Sentiment: {sentiment}")
+                    elif sentiment == "Positive":
+                        st.success(f"Sentiment: {sentiment}")
+                    else:
+                        st.warning(f"Sentiment: {sentiment}")
+                
+                with col2:
+                    st.info(f"Core Issue: {result.get('core_issue')}")
+
+                st.markdown("**Generated Google Maps Reply:**")
+                st.code(result.get("generated_reply"), language="text")
+
+                with st.expander("💡 Staff Action Recommendation"):
+                    st.write(result.get("staff_action_tip"))
+
+            except Exception as e:
+                st.error(f"API Request Failed: {str(e)}")
